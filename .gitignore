@@ -1,137 +1,29 @@
+# Environment files
+.env
+*.env
+.env.*
+**/.env
+**/*.env
+.env.local
+.env.*.local
+
+# Data folders
+data/
+Data/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual Environment
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.venv/
-
-# Environment Variables
-.env
-.env.local
-.env.*.local
-
-# AWS
-.aws-sam/
-samconfig.toml
-.chalice/deployments/
-.chalice/venv/
-
-# IDEs
+# OS/Editor
+.DS_Store
+Thumbs.db
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.hypothesis/
 
 # Logs
 *.log
-logs/
-
-# Terraform/Infrastructure
-*.tfstate
-*.tfstate.*
-.terraform/
-*.tfvars
-!example.tfvars
-
-# CDK
-cdk.out/
-.cdk.staging/
-
-# Node modules (if using CDK)
-node_modules/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-.cache/
-
-# Package files
-*.zip
-*.tar.gz
-
-# Secrets and credentials
-credentials.json
-secrets.json
-*.pem
-*.key
-
-# Type checking / linters
-.mypy_cache/
-.dmypy.json
-.pyre/
-.pytype/
-.ruff_cache/
-
-# Coverage / test artifacts (extended)
-.coverage.*
-coverage.xml
-nosetests.xml
-test-results/
-.nox/
-
-# Packaging / dependency managers
-.poetry/
-poetry.lock
-Pipfile
-Pipfile.lock
-.pdm-python
-__pypackages__/
-
-# Environment management
-.conda/
-*.conda
-*.spec
-
-# Build / profiling / perf
-prof/
-*.prof
-*.lprof
-*.pstats
-profile_output/
-benchmarks/
-
-# Security / certificates
-*.crt
-*.der
-
-# Local tooling
-.local/
-.cache/
-.pyenv/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
