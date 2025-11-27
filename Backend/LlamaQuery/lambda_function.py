@@ -1,10 +1,3 @@
-"""
-Required Environment Variables:
-- CHUNKS_TABLE: DynamoDB table name for storing document chunks/embeddings
-- SESSIONS_TABLE: DynamoDB table name for session records
-- OPENAI_API_KEY: OpenAI API key for embeddings and LLM calls
-"""
-
 import json
 import boto3
 import os

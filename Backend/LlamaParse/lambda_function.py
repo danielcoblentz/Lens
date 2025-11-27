@@ -1,12 +1,3 @@
-"""
-Security note:
-- Do not print/log environment variables or secrets.
-- Required env vars for this function:
-  - BUCKET_NAME: S3 bucket for PDFs
-  - SESSIONS_TABLE: DynamoDB table for sessions
-  - CHUNKS_TABLE: DynamoDB table for chunks/embeddings
-  - OPENAI_API_KEY: used by OpenAI client (set in Lambda env, never logged)
-"""
 import json
 import boto3
 import os
