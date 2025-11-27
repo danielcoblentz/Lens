@@ -1,18 +1,20 @@
 import React, { useState, useRef } from "react";
-import Sidebar from "./components/Sidebar";
+import Sidebar from "../components/Sidebar";
+import FileViewer from "../components/FileViewer";
+
 
 function Home() {
-  // store only metadata in state (keeps serializable/lightweight)
   const [filesMeta, setFilesMeta] = useState([]);
-  // store actual File objects in a ref (not serialized)
-  const filesRef = useRef([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const filesRef = useRef([]); // actual File objects
 
   const handleUpload = (e) => {
     const selected = Array.from(e.target.files || []);
-    // push actual File objects into the ref
+
+    // store File objects
     filesRef.current = [...filesRef.current, ...selected];
 
-    // create metadata list for UI only
+    // keep metadata for UI
     const metas = selected.map((f) => ({
       name: f.name,
       size: f.size,
@@ -23,9 +25,21 @@ function Home() {
     setFilesMeta((prev) => [...prev, ...metas]);
   };
 
+  const handleSelect = (fileMeta) => {
+    // find the file object that matches the metadata
+    const actualFile = filesRef.current.find(
+      (f) =>
+        f.name === fileMeta.name &&
+        f.size === fileMeta.size &&
+        f.lastModified === fileMeta.lastModified
+    );
+
+    setSelectedFile(actualFile || null);
+  };
+
   return (
     <div style={{ display: "flex" }}>
-      <Sidebar files={filesMeta} />
+      <Sidebar files={filesMeta} onSelect={handleSelect} />
 
       <div style={{ padding: "2rem", flex: 1 }}>
         <h1>Upload Files</h1>
@@ -33,12 +47,14 @@ function Home() {
         <input 
           type="file" 
           multiple 
-          onChange={handleUpload}
-        />
+          accept="application/pdf"
+          onChange={handleUpload}/>
 
         <p style={{ marginTop: "1rem" }}>
-          Uploaded files will appear in the sidebar. Note: file contents are kept only in memory and are not written to disk by the app.
+          Uploaded files will appear in the sidebar.
         </p>
+
+        <FileViewer selectedFile={selectedFile} />
       </div>
     </div>
   );
