@@ -31,13 +31,13 @@ function FileViewer({ selectedFile }) {
         onLoadSuccess={({ numPages }) => setNumPages(numPages)}
         onLoadError={(e) => console.error("Error loading PDF:", e)}
       >
-        {/* render pages only when PDF is fully loaded */}
+        {/* Only render pages after the PDF reports its page count */}
         {numPages &&
           [...Array(numPages).keys()].map((i) => (
             <Page
               key={i}
               pageNumber={i + 1}
-              width={800}
+              width={650}
             />
           ))}
       </Document>
@@ -45,7 +45,7 @@ function FileViewer({ selectedFile }) {
   );
 }
 
-//style to pdf layout
+// Inline styles for the PDF viewer
 const styles = {
   viewer: {
     padding: "2rem",

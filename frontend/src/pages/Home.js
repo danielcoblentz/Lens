@@ -1,12 +1,13 @@
 import React, { useState, useRef } from "react";
 import Sidebar from "../components/Sidebar";
 import FileViewer from "../components/FileViewer";
+import ChatBox from "../components/chatBox";
 
 
 function Home() {
   const [filesMeta, setFilesMeta] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
-  const filesRef = useRef([]); // actual File objects
+  const filesRef = useRef([]); // File objects
 
   const handleUpload = (e) => {
     const selected = Array.from(e.target.files || []);
@@ -38,24 +39,25 @@ function Home() {
   };
 
   return (
-    <div style={{ display: "flex" }}>
+    <div style={{ display: "flex", height: "100vh" }}>
+      
+      {/* LEFT: Sidebar */}
       <Sidebar files={filesMeta} onSelect={handleSelect} />
 
-      <div style={{ padding: "2rem", flex: 1 }}>
-        <h1>Upload Files</h1>
+      {/* MIDDLE: Viewer + Upload area */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "2rem" }}>
+          <h1>Upload Files</h1>
+          <input type="file" multiple onChange={handleUpload} />
+        </div>
 
-        <input 
-          type="file" 
-          multiple 
-          accept="application/pdf"
-          onChange={handleUpload}/>
-
-        <p style={{ marginTop: "1rem" }}>
-          Uploaded files will appear in the sidebar.
-        </p>
-
-        <FileViewer selectedFile={selectedFile} />
+        <div style={{ flex: 1, overflow: "auto" }}>
+          <FileViewer selectedFile={selectedFile} />
+        </div>
       </div>
+
+      <ChatBox />   
+
     </div>
   );
 }
