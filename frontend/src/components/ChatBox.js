@@ -1,20 +1,22 @@
 import { useState } from "react";
 
-function ChatBox () {
-    const [messages, setMesssages] = useState([]);
-    const [input, setInput] = useState("");
+function ChatBox() {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
 
-    const handleSend = () => {
-        if (!input.trim()) return;
+  const handleSend = () => {
+    if (!input.trim()) return;
 
-        setMesssages(prev => [...prev, {role: "user", content: input}]);
-        setInput("")
+    setMessages((prev) => [...prev, { role: "user", content: input }]);
+    setInput("");
 
-        setMesssages(prev => [...prev, {role: "assistant", content: "Assistant response placeholder."}]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "Assistant response placeholder." },
+    ]);
+  };
 
-    };
-
-    return (
+  return (
     <div style={styles.container}>
       <div style={styles.messages}>
         {messages.map((msg, i) => (

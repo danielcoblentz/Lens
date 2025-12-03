@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs",import.meta.url).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).toString();
 
 function FileViewer({ selectedFile }) {
   const [fileUrl, setFileUrl] = useState(null);
@@ -11,15 +14,18 @@ function FileViewer({ selectedFile }) {
     if (!selectedFile) {
       setFileUrl(null);
       setNumPages(null);
-      return;}
+      return;
+    }
 
     const url = URL.createObjectURL(selectedFile);
     setFileUrl(url);
 
-    return () => URL.revokeObjectURL(url);}, [selectedFile]);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedFile]);
 
   if (!selectedFile) {
-    return <div style={styles.empty}>No file selected</div>;}
+    return <div style={styles.empty}>No file selected</div>;
+  }
 
   return (
     <div style={styles.viewer}>
@@ -27,18 +33,14 @@ function FileViewer({ selectedFile }) {
 
       <Document
         file={fileUrl}
-        loading={<p>Loading PDF…</p>}
+        loading={<p>Loading PDF...</p>}
         onLoadSuccess={({ numPages }) => setNumPages(numPages)}
         onLoadError={(e) => console.error("Error loading PDF:", e)}
       >
         {/* Only render pages after the PDF reports its page count */}
         {numPages &&
           [...Array(numPages).keys()].map((i) => (
-            <Page
-              key={i}
-              pageNumber={i + 1}
-              width={650}
-            />
+            <Page key={i} pageNumber={i + 1} width={650} />
           ))}
       </Document>
     </div>

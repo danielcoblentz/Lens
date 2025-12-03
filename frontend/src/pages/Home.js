@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import Sidebar from "../components/Sidebar";
 import FileViewer from "../components/FileViewer";
-import ChatBox from "../components/chatBox";
+import ChatBox from "../components/ChatBox";
 
 
 function Home() {
