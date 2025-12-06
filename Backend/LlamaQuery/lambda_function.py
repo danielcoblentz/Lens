@@ -35,11 +35,19 @@ def lambda_handler(event, context):
     session_id = body["sessionId"]
     user_query = body["query"]
 
+    cors_headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS"
+    }
+
     # check if the session exists
     session = sessions_table.get_item(Key={"sessionId": session_id})
     if "Item" not in session:
         return {
             "statusCode": 404,
+            "headers": cors_headers,
             "body": json.dumps({"error": "Invalid sessionId"})}
 
     # generate embeddings for the user query
@@ -53,6 +61,7 @@ def lambda_handler(event, context):
     if not chunks:
         return {
             "statusCode": 404,
+            "headers": cors_headers,
             "body": json.dumps({"error": "No chunks found"})
         }
 
@@ -97,7 +106,7 @@ Give a precise legal answer grounded strictly in the document.
     # return answer back to user
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": cors_headers,
         "body": json.dumps({
             "sessionId": session_id,
             "answer": answer

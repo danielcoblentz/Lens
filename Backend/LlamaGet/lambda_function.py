@@ -43,7 +43,12 @@ def lambda_handler(event, context):
     #  return sessionId ands upload URL to frontend
     return {
         "statusCode": 200,
-        "headers": { "Content-Type": "application/json" },
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "POST, OPTIONS"
+        },
         "body": json.dumps({
             "sessionId": session_id,
             "uploadUrl": upload_url

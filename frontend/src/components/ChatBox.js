@@ -1,19 +1,39 @@
 import { useState } from "react";
+import { queryRAG } from "../services/aws";
 
-function ChatBox() {
+function ChatBox({ sessionId }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
-    setMessages((prev) => [...prev, { role: "user", content: input }]);
-    setInput("");
+    if (!sessionId) {
+      alert("Please select an uploaded document first");
+      return;
+    }
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", content: "Assistant response placeholder." },
-    ]);
+    const userMessage = input;
+    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+    setInput("");
+    setIsLoading(true);
+
+    try {
+      const response = await queryRAG(sessionId, userMessage);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: response.answer },
+      ]);
+    } catch (error) {
+      console.error("Query failed:", error);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error: ${error.message}` },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -37,12 +57,20 @@ function ChatBox() {
         <input
           style={styles.input}
           value={input}
-          placeholder="Ask a question..."
+          placeholder={sessionId ? "Ask a question..." : "Select a document first"}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          onKeyDown={(e) => e.key === "Enter" && !isLoading && handleSend()}
+          disabled={isLoading || !sessionId}
         />
-        <button style={styles.button} onClick={handleSend}>
-          Send
+        <button
+          style={{
+            ...styles.button,
+            opacity: isLoading || !sessionId ? 0.6 : 1,
+          }}
+          onClick={handleSend}
+          disabled={isLoading || !sessionId}
+        >
+          {isLoading ? "..." : "Send"}
         </button>
       </div>
     </div>

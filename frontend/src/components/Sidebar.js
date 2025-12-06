@@ -1,23 +1,68 @@
 import React from "react";
 
+// Status indicator component
+function StatusBadge({ status, progress }) {
+  const getStatusStyle = () => {
+    switch (status) {
+      case "uploading":
+        return { background: "#ffd700", color: "#000" };
+      case "processing":
+        return { background: "#87ceeb", color: "#000" };
+      case "ready":
+        return { background: "#90ee90", color: "#000" };
+      case "error":
+        return { background: "#ff6b6b", color: "#fff" };
+      default:
+        return { background: "#ddd", color: "#000" };
+    }
+  };
+
+  const getStatusText = () => {
+    switch (status) {
+      case "uploading":
+        return `${progress}%`;
+      case "processing":
+        return "Processing...";
+      case "ready":
+        return "Ready";
+      case "error":
+        return "Error";
+      default:
+        return "";
+    }
+  };
+
+  return (
+    <span style={{ ...styles.badge, ...getStatusStyle() }}>
+      {getStatusText()}
+    </span>
+  );
+}
+
 // holds files the user will upload and later review the contents
-function Sidebar({ files, onSelect }) {
+function Sidebar({ files, onSelect, uploadStatus = {} }) {
   return (
     <div style={styles.sidebar}>
-      <h2 style={styles.title}>AWS Lambda</h2>
+      <h2 style={styles.title}>Lens</h2>
       <h3 style={styles.header}>Files</h3>
 
       {/* scrollable section if we have many files uploaded */}
       <div style={styles.list}>
-        {files.map((file, idx) => (
-          <div 
-            key={idx} 
-            style={styles.item}
-            onClick={() => onSelect(file)}
-          >
-            {file.name}
-          </div>
-        ))}
+        {files.map((file, idx) => {
+          const status = uploadStatus[file.name];
+          return (
+            <div
+              key={idx}
+              style={styles.item}
+              onClick={() => onSelect(file)}
+            >
+              <div style={styles.fileName}>{file.name}</div>
+              {status && (
+                <StatusBadge status={status.status} progress={status.progress} />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -56,7 +101,24 @@ const styles = {
     background: "#fff",
     borderRadius: "4px",
     border: "1px solid #ccc",
-    cursor: "pointer"    
+    cursor: "pointer",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "0.5rem"
+  },
+  fileName: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    flex: 1
+  },
+  badge: {
+    padding: "0.2rem 0.5rem",
+    borderRadius: "4px",
+    fontSize: "0.75rem",
+    fontWeight: "bold",
+    whiteSpace: "nowrap"
   }
 };
 

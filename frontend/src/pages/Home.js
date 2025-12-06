@@ -2,28 +2,73 @@ import React, { useState, useRef } from "react";
 import Sidebar from "../components/Sidebar";
 import FileViewer from "../components/FileViewer";
 import ChatBox from "../components/ChatBox";
-
+import { uploadPDF } from "../services/aws";
 
 function Home() {
   const [filesMeta, setFilesMeta] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState({}); // { [fileName]: { progress, status, sessionId } }
   const filesRef = useRef([]); // File objects
 
-  const handleUpload = (e) => {
+  const handleUpload = async (e) => {
     const selected = Array.from(e.target.files || []);
 
-    // store File objects
-    filesRef.current = [...filesRef.current, ...selected];
+    for (const file of selected) {
+      // Only allow PDFs
+      if (file.type !== "application/pdf") {
+        alert(`${file.name} is not a PDF file`);
+        continue;
+      }
 
-    // keep metadata for UI
-    const metas = selected.map((f) => ({
-      name: f.name,
-      size: f.size,
-      type: f.type,
-      lastModified: f.lastModified,
-    }));
+      // store  File object
+      filesRef.current = [...filesRef.current, file];
 
-    setFilesMeta((prev) => [...prev, ...metas]);
+      // Add metadata for UI
+      const meta = {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+      };
+      setFilesMeta((prev) => [...prev, meta]);
+
+      // initial upload status
+      setUploadStatus((prev) => ({
+        ...prev,
+        [file.name]: { progress: 0, status: "uploading", sessionId: null },
+      }));
+
+      try {
+        // Upload to S3 via presigned URL
+        const { sessionId } = await uploadPDF(file, (progress) => {
+          setUploadStatus((prev) => ({
+            ...prev,
+            [file.name]: { ...prev[file.name], progress },
+          }));
+        });
+
+        // Update status to processing (S3 triggers LlamaParse)
+        setUploadStatus((prev) => ({
+          ...prev,
+          [file.name]: { progress: 100, status: "processing", sessionId },
+        }));
+
+        // , assume processing is complete after 10 sec (may change this later)
+        
+        setTimeout(() => {
+          setUploadStatus((prev) => ({
+            ...prev,
+            [file.name]: { ...prev[file.name], status: "ready" },}));}, 10000);
+
+      } catch (error) {
+        console.error("Upload failed:", error);
+        setUploadStatus((prev) => ({
+          ...prev,
+          [file.name]: { progress: 0, status: "error", error: error.message },
+        }));
+      }
+    }
   };
 
   const handleSelect = (fileMeta) => {
@@ -32,23 +77,27 @@ function Home() {
       (f) =>
         f.name === fileMeta.name &&
         f.size === fileMeta.size &&
-        f.lastModified === fileMeta.lastModified
-    );
+        f.lastModified === fileMeta.lastModified);
 
     setSelectedFile(actualFile || null);
+
+    //  set active session ID for querying
+    const status = uploadStatus[fileMeta.name];
+    // Always update sessionId (set to null if not available yet)
+    setActiveSessionId(status?.sessionId || null);
   };
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-      
+
       {/* LEFT: Sidebar */}
-      <Sidebar files={filesMeta} onSelect={handleSelect} />
+      <Sidebar files={filesMeta} onSelect={handleSelect} uploadStatus={uploadStatus} />
 
       {/* MIDDLE: Viewer + Upload area */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "2rem" }}>
           <h1>Upload Files</h1>
-          <input type="file" multiple onChange={handleUpload} />
+          <input type="file" multiple accept=".pdf" onChange={handleUpload} />
         </div>
 
         <div style={{ flex: 1, overflow: "auto" }}>
@@ -56,7 +105,7 @@ function Home() {
         </div>
       </div>
 
-      <ChatBox />   
+      <ChatBox sessionId={activeSessionId} />
 
     </div>
   );
