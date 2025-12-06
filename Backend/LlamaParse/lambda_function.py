@@ -18,7 +18,7 @@ chunks_table = dynamodb.Table(CHUNKS_TABLE)
 client = OpenAI()
 
 
-# Split extracted document text into semantically useful chunks
+# Split extracted document text into  chunks
 def chunk_text(text, max_chars=800):  
     chunks = []
     current = ""
@@ -34,12 +34,15 @@ def chunk_text(text, max_chars=800):
         chunks.append(current.strip())
 
     return chunks
-# Generate embedding for chunk text using OpenAI
+
+
+# Generate embedding for chunk text using OpenAI API
 def embed_text(text):
     response = client.embeddings.create(
         model="text-embedding-3-small",
         input=text)
     return response.data[0].embedding
+
 
 def lambda_handler(event, context):
     # Extract S3 file info
@@ -85,7 +88,7 @@ def lambda_handler(event, context):
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={":status": "READY_FOR_QUERY"}
     )
-
+# return the ans back to user
     return {
         "statusCode": 200,
         "body": json.dumps({

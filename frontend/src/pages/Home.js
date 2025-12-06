@@ -8,20 +8,20 @@ function Home() {
   const [filesMeta, setFilesMeta] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [uploadStatus, setUploadStatus] = useState({}); // { [fileName]: { progress, status, sessionId } }
-  const filesRef = useRef([]); // File objects
+  const [uploadStatus, setUploadStatus] = useState({});               // { [fileName]: { progress, status, sessionId } }
+  const filesRef = useRef([]); // file objects
 
   const handleUpload = async (e) => {
     const selected = Array.from(e.target.files || []);
 
     for (const file of selected) {
-      // Only allow PDFs
+      // Only allow PDFs -- may update later for multiple formats
       if (file.type !== "application/pdf") {
         alert(`${file.name} is not a PDF file`);
         continue;
       }
 
-      // store  File object
+      // store file object
       filesRef.current = [...filesRef.current, file];
 
       // Add metadata for UI
@@ -40,7 +40,7 @@ function Home() {
       }));
 
       try {
-        // Upload to S3 via presigned URL
+        // upload to S3 via presigned URL
         const { sessionId } = await uploadPDF(file, (progress) => {
           setUploadStatus((prev) => ({
             ...prev,
@@ -48,13 +48,13 @@ function Home() {
           }));
         });
 
-        // Update status to processing (S3 triggers LlamaParse)
+        // update status to processing (S3 triggers LlamaParse)
         setUploadStatus((prev) => ({
           ...prev,
           [file.name]: { progress: 100, status: "processing", sessionId },
         }));
 
-        // , assume processing is complete after 10 sec (may change this later)
+        // assume processing is complete after 10 sec default (changing this later to be a response after the doc is done processing once recieved it will update UI)
         
         setTimeout(() => {
           setUploadStatus((prev) => ({
@@ -83,7 +83,7 @@ function Home() {
 
     //  set active session ID for querying
     const status = uploadStatus[fileMeta.name];
-    // Always update sessionId (set to null if not available yet)
+    // always update sessionId (set to null if not available yet)
     setActiveSessionId(status?.sessionId || null);
   };
 
