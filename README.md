@@ -1,99 +1,70 @@
-# Lens: Serverless Legal Document RAG on AWS
+# Lens
 
-## Architecture
+A serverless document analysis tool that lets users upload legal contracts and ask questions about them using retrieval-augmented generation. Built on AWS Lambda, DynamoDB, S3, and OpenAI.
+
+## System Design
+
 <p align="center">
-  <img src="System_architecture/architecture.png" alt="Overall architecture diagram" width="100%" />
+  <img src="System_architecture/architecture.png" alt="System Architecture" width="100%" />
 </p>
 
-- Upload flow: LlamaGet issues a presigned URL, the React app uploads the PDF directly to S3, and an S3 event triggers LlamaParse to extract text, chunk it, and store embeddings in DynamoDB.
-- Query flow: LlamaQuery retrieves the top chunks by cosine similarity, builds a legal-assistant prompt, and returns grounded answers via API Gateway to the frontend chat pane.
-- Storage: raw PDFs in S3, session metadata and chunks/embeddings in DynamoDB. OpenAI handles both embeddings and generation.
-- Networking: all calls are HTTPS via API Gateway; Lambdas require outbound internet for OpenAI.
-- To learn more about this architecture, you can drop a link to your internal design doc or blog post here.
+The system is split into three Lambda functions connected by S3 events and API Gateway:
 
-## Demo
-<p align="center">
-  <img src="docs/demo.gif" alt="Application demo" width="100%" />
-</p>
+**LlamaGet** handles session creation. When a user uploads a file, the frontend requests a presigned S3 URL and a new session ID. The PDF is uploaded directly from the browser to S3, keeping Lambda out of the data path.
 
-_Add your architecture PNG and demo GIF/MP4 to make these full-width visuals._
+**LlamaParse** is triggered automatically by the S3 upload event. It downloads the PDF, extracts text, splits it into overlapping chunks using recursive hierarchical separators, generates vector embeddings for each chunk via OpenAI, and stores everything in DynamoDB. Once done, it marks the session as ready for queries.
 
-## Features
-- Chat playground: React client with PDF viewer (react-pdf) and a chat pane scaffolded for RAG answers.
-- Chat history management: current chat persists in-browser state; extend to persist by sessionId when wiring the API.
-- Serverless knowledge base: presigned upload to S3, embeddings and chunks persisted in DynamoDB, no servers to manage.
-- Dynamic prompt management: legal-focused prompt lives in `backend/LlamaQuery/lambda_function.py` and can be overridden per deployment.
+**LlamaQuery** handles the question-answering flow. It embeds the user's question, retrieves all stored chunks for that session, ranks them by cosine similarity, selects the most relevant ones, and sends them to the LLM with a legal analysis prompt. The response is returned along with latency metrics.
 
-## Changing the default prompt dynamically
-1) Open `backend/LlamaQuery/lambda_function.py`.
-2) Update the `prompt` template and/or the system message passed to `chat.completions.create`.
-3) Optionally read a `DEFAULT_PROMPT` env var and fall back to the current string.
-4) Redeploy the LlamaQuery Lambda so all users receive the new prompt.
+Storage is split between S3 for raw PDFs and DynamoDB for session metadata, text chunks, and embedding vectors. All external communication goes through API Gateway over HTTPS.
 
-## Prerequisites
-- Node.js >= 18 and npm (frontend uses Create React App).
-- Python 3.10+ for packaging Lambdas; virtualenv recommended.
-- AWS account with S3, DynamoDB, Lambda, API Gateway, and permissions to create S3 event notifications.
-- OpenAI API key available to Lambdas as `OPENAI_API_KEY`.
-- AWS CLI configured locally if you deploy from your machine.
+## Getting Started
 
-## Config
-### Supported regions
-Works in any region with S3, DynamoDB, Lambda, and API Gateway. Pick a region with low latency to your users (e.g., `us-east-1`, `us-west-2`, `eu-west-1`). Ensure egress to OpenAI is allowed from your VPC (or run Lambdas without VPC attachment).
+### Frontend
 
-### Environment variables
-- LlamaGet: `BUCKET_NAME`, `TABLE_NAME` (sessions table).
-- LlamaParse: `BUCKET_NAME`, `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY`.
-- LlamaQuery: `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY`, optional `DEFAULT_PROMPT` if you add it.
-
-### Embedding and LLM configuration
-Current models are hardcoded:
-- Embeddings: `text-embedding-3-small` in `backend/LlamaParse/lambda_function.py` and `backend/LlamaQuery/lambda_function.py`.
-- Generation: `gpt-4o-mini` in `backend/LlamaQuery/lambda_function.py`.
-If you switch models after data is ingested, re-embed stored chunks to avoid mixing vector dimensions.
-
-### Sample .env for local packaging
+```bash
+cd frontend
+npm install
+npm start
 ```
-OPENAI_API_KEY=sk-xxxx
-BUCKET_NAME=lens-uploads
-TABLE_NAME=LensSessions
-SESSIONS_TABLE=LensSessions
-CHUNKS_TABLE=LensChunks
+
+The dev server starts at [http://localhost:3000](http://localhost:3000). API endpoints are configured in `frontend/.env`.
+
+### Backend
+
+Each Lambda function lives in `backend/` and needs to be packaged with its dependencies before deploying to AWS:
+
+```bash
+# LlamaGet uses boto3 which is already available in Lambda
+
+# LlamaParse
+pip install PyPDF2 openai -t backend/LlamaParse
+
+# LlamaQuery
+pip install -r backend/LlamaQuery/requirements.txt -t backend/LlamaQuery
 ```
-Keep `.env` out of version control.
 
-## Installation
-- Backend (per Lambda):
-  - `python -m venv .venv && .\.venv\Scripts\activate`
-  - Install deps into each function folder before zipping:
-    - LlamaGet: uses `boto3` (available in Lambda), no extra deps.
-    - LlamaParse: `pip install PyPDF2 openai -t backend/LlamaParse`.
-    - LlamaQuery: `pip install -r backend/LlamaQuery/requirements.txt -t backend/LlamaQuery`.
-- Frontend:
-  - `cd frontend`
-  - `npm install`
+### Required AWS Resources
 
-## Deploy
-- Create resources: one S3 bucket for uploads, DynamoDB tables `LensSessions` (pk: `sessionId`) and `LensChunks` (pk: `sessionId`, sort key: `chunkId`).
-- Package and deploy Lambdas:
-  - LlamaGet behind API Gateway for `GET /presign` (returns `sessionId` + `uploadUrl`).
-  - LlamaParse triggered by S3 `ObjectCreated` on `uploads/*`.
-  - LlamaQuery behind API Gateway for `POST /query`.
-- Set the environment variables above on each Lambda role; attach IAM policies for S3 get/put and DynamoDB read/write on the two tables.
-- Enable CORS on API Gateway for your frontend origin.
+- An S3 bucket for PDF uploads
+- Two DynamoDB tables: one for sessions (`sessionId` as partition key) and one for chunks (`sessionId` as partition key, `chunkId` as sort key)
+- API Gateway with POST routes for `/llamaGet` and `/query`
+- An S3 event notification on the `uploads/` prefix to trigger LlamaParse
 
-## Test
-- Presign: `curl "https://<api>/presign?filename=contract.pdf"` -> note `sessionId` and `uploadUrl`.
-- Upload: `curl -X PUT -T ./sample.pdf -H "Content-Type: application/pdf" "<uploadUrl>"`.
-- Parse: confirm the S3 event fires and DynamoDB `LensChunks` receives embeddings; session status should become `READY_FOR_QUERY`.
-- Query: `curl -X POST "https://<api>/query" -H "Content-Type: application/json" -d '{"sessionId":"<id>","query":"What is the termination clause?"}'`.
+### Environment Variables
 
-## Running the frontend locally
-- `cd frontend`
-- `npm start`
-- The UI supports local file selection + PDF viewing. Wire API calls in `src/pages/Home.js` (upload flow) and `src/components/chatBox.js` (answer display) to hit your deployed endpoints when ready.
+Set these in the Lambda console for each function:
 
-## Example API shapes
-- `GET /presign?filename=my.pdf` -> `{ sessionId, uploadUrl, s3Key, expiresIn }`
-- `POST /query` with `{ sessionId, query }` -> `{ sessionId, answer, topChunks? }`
-Adjust shapes as you add pagination, citations, or auth.
+| Function | Variables |
+|----------|-----------|
+| LlamaGet | `BUCKET_NAME`, `TABLE_NAME` |
+| LlamaParse | `BUCKET_NAME`, `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
+| LlamaQuery | `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
+
+## Usage
+
+1. Start the frontend and open it in a browser
+2. Upload a PDF using the file input
+3. Wait for the status badge to show "Ready"
+4. Click on the file in the sidebar to view it
+5. Ask questions about the document in the chat panel
