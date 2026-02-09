@@ -2,113 +2,116 @@ import json
 import boto3
 import os
 import math
+import time
 from boto3.dynamodb.conditions import Key
 from openai import OpenAI
 
-client = OpenAI()
+openai_client = OpenAI()
+dynamodb_resource = boto3.resource("dynamodb")
+chunks_table = dynamodb_resource.Table(os.environ["CHUNKS_TABLE"])
+sessions_table = dynamodb_resource.Table(os.environ["SESSIONS_TABLE"])
 
-dynamodb = boto3.resource("dynamodb")
-chunks_table = dynamodb.Table(os.environ["CHUNKS_TABLE"])
-sessions_table = dynamodb.Table(os.environ["SESSIONS_TABLE"])
+CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS"
+}
 
 
-
-# convert user query into an embedding vector
-def embed_text(text):  
-    response = client.embeddings.create(
+def get_query_embedding(query_text):
+    response = openai_client.embeddings.create(
         model="text-embedding-3-small",
-        input=text)
+        input=query_text
+    )
     return response.data[0].embedding
 
 
-# compute cosine similarity
-def cosine_similarity(a, b):
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    return dot / (norm_a * norm_b + 1e-9)
+def cosine_similarity(vec_a, vec_b):
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    mag_a = math.sqrt(sum(a * a for a in vec_a))
+    mag_b = math.sqrt(sum(b * b for b in vec_b))
+    return dot / (mag_a * mag_b + 1e-9)
 
 
-#main lambda logic
 def lambda_handler(event, context):
+    start_time = time.time()
+    metrics = {}
+
     body = json.loads(event["body"])
     session_id = body["sessionId"]
-    user_query = body["query"]
+    question = body["query"]
 
-    cors_headers = {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS"
-    }
-
-    # check if the session exists
     session = sessions_table.get_item(Key={"sessionId": session_id})
     if "Item" not in session:
-        return {
-            "statusCode": 404,
-            "headers": cors_headers,
-            "body": json.dumps({"error": "Invalid sessionId"})}
+        return {"statusCode": 404, "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "Invalid sessionId"})}
 
-    # generate embeddings for the user query
-    query_embedding = embed_text(user_query)
+    embed_start = time.time()
+    query_embedding = get_query_embedding(question)
+    metrics["embedding_time_ms"] = round((time.time() - embed_start) * 1000)
 
-    # get all chunks from DynamoDB
-    response = chunks_table.query(
-        KeyConditionExpression=Key("sessionId").eq(session_id))
-    chunks = response.get("Items", [])
+    chunks_response = chunks_table.query(
+        KeyConditionExpression=Key("sessionId").eq(session_id)
+    )
+    chunks = chunks_response.get("Items", [])
 
     if not chunks:
-        return {
-            "statusCode": 404,
-            "headers": cors_headers,
-            "body": json.dumps({"error": "No chunks found"})
-        }
+        return {"statusCode": 404, "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "No chunks found"})}
 
-    #  score each chunk with cosine similarity
+    # score chunks by similarity to the query
+    search_start = time.time()
     scored = []
-    for item in chunks:
-        embedding = item.get("embedding")
+    for chunk in chunks:
+        embedding = chunk.get("embedding")
         if embedding:
-            sim = cosine_similarity(query_embedding, embedding)
-            scored.append((sim, item["text"]))
+            emb_floats = [float(v) for v in embedding]
+            sim = cosine_similarity(query_embedding, emb_floats)
+            scored.append((sim, chunk["text"]))
+    metrics["similarity_search_time_ms"] = round((time.time() - search_start) * 1000)
+    metrics["chunks_searched"] = len(chunks)
 
-    #  take the top 3 most similar chunks
-    top_k = sorted(scored, key=lambda x: x[0], reverse=True)[:3]
+    # top 5 most relevant chunks
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_chunks = scored[:5]
+    context = "\n\n---\n\n".join(text for _, text in top_chunks)
 
-    context = "\n\n---\n\n".join(chunk for _, chunk in top_k)
+    prompt = f"""You are a legal contract analyst. Extract and explain the relevant clause.
 
-    # build the final RAG prompt
-    prompt = f"""
-You are a legal assistant. Use only the provided contract text to answer.
-
-CONTEXT:
+CONTRACT EXCERPTS:
 {context}
 
-USER QUESTION:
-{user_query}
+QUESTION: {question}
 
-Give a precise legal answer grounded strictly in the document.
-"""
+INSTRUCTIONS:
+- Quote relevant language directly from the contract
+- Include key terms: parties, dates, amounts, conditions, obligations
+- Be comprehensive but grounded only in the provided text
 
-    #  GPT for final answer
-    llm_response = client.chat.completions.create(
+ANSWER:"""
+
+    llm_start = time.time()
+    response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You answer using only the provided context."},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=400
+        max_tokens=600
     )
+    metrics["llm_time_ms"] = round((time.time() - llm_start) * 1000)
 
-    answer = llm_response.choices[0].message.content
+    answer = response.choices[0].message.content
+    metrics["total_time_ms"] = round((time.time() - start_time) * 1000)
+    metrics["top_chunk_similarity"] = round(top_chunks[0][0], 4) if top_chunks else 0
 
-    # return answer back to user
     return {
         "statusCode": 200,
-        "headers": cors_headers,
+        "headers": CORS_HEADERS,
         "body": json.dumps({
             "sessionId": session_id,
-            "answer": answer
+            "answer": answer,
+            "metrics": metrics
         })
     }
