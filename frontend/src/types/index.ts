@@ -1,5 +1,3 @@
-// shared types for the app
-
 export interface FileMeta {
   name: string;
   size: number;
