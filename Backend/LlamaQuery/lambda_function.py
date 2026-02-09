@@ -47,6 +47,7 @@ def lambda_handler(event, context):
         return {"statusCode": 404, "headers": CORS_HEADERS,
                 "body": json.dumps({"error": "Invalid sessionId"})}
 
+    # embed the question so we can compare against stored chunk embeddings
     embed_start = time.time()
     query_embedding = get_query_embedding(question)
     metrics["embedding_time_ms"] = round((time.time() - embed_start) * 1000)
@@ -60,7 +61,7 @@ def lambda_handler(event, context):
         return {"statusCode": 404, "headers": CORS_HEADERS,
                 "body": json.dumps({"error": "No chunks found"})}
 
-    # score chunks by similarity to the query
+    # rank chunks by cosine similarity to the question
     search_start = time.time()
     scored = []
     for chunk in chunks:
@@ -72,7 +73,7 @@ def lambda_handler(event, context):
     metrics["similarity_search_time_ms"] = round((time.time() - search_start) * 1000)
     metrics["chunks_searched"] = len(chunks)
 
-    # top 5 most relevant chunks
+    # grab the top 5 most relevant chunks for the llm prompt
     scored.sort(key=lambda x: x[0], reverse=True)
     top_chunks = scored[:5]
     context = "\n\n---\n\n".join(text for _, text in top_chunks)

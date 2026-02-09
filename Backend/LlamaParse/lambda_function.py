@@ -16,17 +16,15 @@ openai_client = OpenAI()
 
 
 def recursive_chunk_text(text, chunk_size=800, chunk_overlap=100, separators=None):
-    """
-    split text using hierarchical separators: paragraphs -> lines -> sentences -> words.
-    each level preserves more semantic meaning than fixed-size splitting.
-    overlap between chunks maintains context at boundaries.
-    """
+    """split text by trying separators in order: paragraphs, lines, sentences, words.
+    overlap between chunks keeps context at the boundaries."""
     if separators is None:
         separators = ["\n\n", "\n", ". ", " "]
 
     if len(text) <= chunk_size:
         return [text.strip()] if text.strip() else []
 
+    # pick the first separator that actually appears in the text
     chosen_separator = separators[-1]
     for sep in separators:
         if sep in text:
@@ -47,16 +45,19 @@ def recursive_chunk_text(text, chunk_size=800, chunk_overlap=100, separators=Non
                 chunks.append(current_chunk.strip())
 
             if len(part_with_sep) > chunk_size:
+                # chunk is still too big, try the next separator down
                 remaining_separators = separators[separators.index(chosen_separator) + 1:]
                 if remaining_separators:
                     sub_chunks = recursive_chunk_text(part, chunk_size, chunk_overlap, remaining_separators)
                     chunks.extend(sub_chunks)
                     current_chunk = ""
                 else:
+                    # no separators left, just hard split
                     for i in range(0, len(part), chunk_size - chunk_overlap):
                         chunks.append(part[i:i + chunk_size].strip())
                     current_chunk = ""
             else:
+                # add overlap from the previous chunk to maintain context
                 if chunks and chunk_overlap > 0:
                     overlap_text = chunks[-1][-chunk_overlap:]
                     current_chunk = overlap_text + " " + part_with_sep
@@ -78,6 +79,7 @@ def generate_embedding(text):
 
 
 def lambda_handler(event, context):
+    # triggered by s3 upload event
     s3_event = event["Records"][0]
     source_bucket = s3_event["s3"]["bucket"]["name"]
     uploaded_key = s3_event["s3"]["object"]["key"]
@@ -85,6 +87,7 @@ def lambda_handler(event, context):
     file_name = uploaded_key.split("/")[-1]
     session_id = file_name.replace(".pdf", "")
 
+    # download and extract text from the pdf
     local_path = f"/tmp/{session_id}.pdf"
     s3_client.download_file(source_bucket, uploaded_key, local_path)
 
@@ -95,6 +98,7 @@ def lambda_handler(event, context):
         if page_text:
             extracted_text += page_text + "\n"
 
+    # chunk the text and generate embeddings for each chunk
     text_chunks = recursive_chunk_text(extracted_text, chunk_size=800, chunk_overlap=100)
 
     for i, chunk_text in enumerate(text_chunks):
@@ -109,6 +113,7 @@ def lambda_handler(event, context):
             "order": i
         })
 
+    # mark session as ready so llamaQuery knows it can accept questions
     sessions_table.update_item(
         Key={"sessionId": session_id},
         UpdateExpression="SET #s = :status",
