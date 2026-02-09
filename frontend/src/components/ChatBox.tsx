@@ -1,151 +1,92 @@
-// chat interface component for asking questions about uploaded documents
+// chat panel for asking questions about the selected document
 
 import { useState } from 'react';
 import { queryRAG } from '../services/aws';
 import { Message } from '../types';
 
 interface ChatBoxProps {
-  sessionId: string | null;  // session id of the currently selected document
+  sessionId: string | null;
 }
 
 function ChatBox({ sessionId }: ChatBoxProps) {
-  // state for all messages in the conversation
   const [conversationMessages, setConversationMessages] = useState<Message[]>([]);
-
-  // state for the text user is currently typing
   const [userInputText, setUserInputText] = useState('');
-
-  // state to track if we're waiting for a response from the server
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
 
 
-  // called when user clicks send or presses enter
   const handleSendMessage = async () => {
-    // don't send empty messages
-    const messageIsEmpty = !userInputText.trim();
-    if (messageIsEmpty) {
-      return;
-    }
+    if (!userInputText.trim()) return;
 
-    // make sure a document is selected first
-    const noDocumentSelected = !sessionId;
-    if (noDocumentSelected) {
+    if (!sessionId) {
       alert('Please select an uploaded document first before asking questions.');
       return;
     }
 
-    // save the message text and clear the input
     const questionText = userInputText;
     setUserInputText('');
 
-    // add user message to conversation
-    const userMessage: Message = {
-      role: 'user',
-      content: questionText,
-    };
-    setConversationMessages((previousMessages) => [...previousMessages, userMessage]);
-
-    // show loading state
+    setConversationMessages((prev) => [...prev, { role: 'user', content: questionText }]);
     setIsWaitingForResponse(true);
 
     try {
-      // send question to backend and get answer
       const ragResponse = await queryRAG(sessionId, questionText);
-      const answerText = ragResponse.answer;
-
-      // add assistant response to conversation
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: answerText,
-      };
-      setConversationMessages((previousMessages) => [...previousMessages, assistantMessage]);
-
-    } catch (queryError) {
-      // handle errors by showing error message in chat
-      console.error('query to backend failed:', queryError);
-
-      const errorText = queryError instanceof Error
-        ? queryError.message
-        : 'unknown error occurred';
-
-      const errorMessage: Message = {
-        role: 'assistant',
-        content: `Error: ${errorText}`,
-      };
-      setConversationMessages((previousMessages) => [...previousMessages, errorMessage]);
-
+      setConversationMessages((prev) => [...prev, { role: 'assistant', content: ragResponse.answer }]);
+    } catch (err) {
+      console.error('query failed:', err);
+      const errorText = err instanceof Error ? err.message : 'unknown error';
+      setConversationMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${errorText}` }]);
     } finally {
-      // hide loading state
       setIsWaitingForResponse(false);
     }
   };
 
 
-  // called when user presses a key in the input field
   const handleKeyPress = (event: React.KeyboardEvent) => {
-    const pressedEnter = event.key === 'Enter';
-    const notCurrentlyLoading = !isWaitingForResponse;
-
-    if (pressedEnter && notCurrentlyLoading) {
+    if (event.key === 'Enter' && !isWaitingForResponse) {
       handleSendMessage();
     }
   };
 
-
-  // determine if input should be disabled
-  const inputShouldBeDisabled = isWaitingForResponse || !sessionId;
-  const placeholderText = sessionId
-    ? 'Ask a question about the document...'
-    : 'Select a document first';
-
+  const inputDisabled = isWaitingForResponse || !sessionId;
+  const placeholderText = sessionId ? 'Ask a question about the document...' : 'Select a document first';
 
   return (
     <div style={chatStyles.container}>
-
-      {/* messages display area */}
       <div style={chatStyles.messagesArea}>
-        {conversationMessages.map((message, messageIndex) => {
-          const isUserMessage = message.role === 'user';
-          const bubbleAlignment = isUserMessage ? 'flex-end' : 'flex-start';
-          const bubbleColor = isUserMessage ? '#daf1ff' : '#eee';
-
+        {conversationMessages.map((msg, i) => {
+          const isUser = msg.role === 'user';
           return (
             <div
-              key={messageIndex}
+              key={i}
               style={{
                 ...chatStyles.messageBubble,
-                alignSelf: bubbleAlignment,
-                background: bubbleColor,
+                alignSelf: isUser ? 'flex-end' : 'flex-start',
+                background: isUser ? '#daf1ff' : '#eee',
               }}
             >
-              {message.content}
+              {msg.content}
             </div>
           );
         })}
       </div>
 
-      {/* input area */}
       <div style={chatStyles.inputArea}>
         <input
           style={chatStyles.textInput}
           value={userInputText}
           placeholder={placeholderText}
-          onChange={(event) => setUserInputText(event.target.value)}
+          onChange={(e) => setUserInputText(e.target.value)}
           onKeyDown={handleKeyPress}
-          disabled={inputShouldBeDisabled}
+          disabled={inputDisabled}
         />
         <button
-          style={{
-            ...chatStyles.sendButton,
-            opacity: inputShouldBeDisabled ? 0.6 : 1,
-          }}
+          style={{ ...chatStyles.sendButton, opacity: inputDisabled ? 0.6 : 1 }}
           onClick={handleSendMessage}
-          disabled={inputShouldBeDisabled}
+          disabled={inputDisabled}
         >
           {isWaitingForResponse ? '...' : 'Send'}
         </button>
       </div>
-
     </div>
   );
 }
