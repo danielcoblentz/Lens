@@ -1,4 +1,4 @@
-// sidebar component - displays list of uploaded files with their status
+// sidebar - file list with upload status badges
 
 import React from 'react';
 import { FileMeta, UploadStatus } from '../types';
@@ -8,96 +8,52 @@ interface StatusBadgeProps {
   progress: number;
 }
 
-// shows the upload/processing status of a file
 function StatusBadge({ status, progress }: StatusBadgeProps) {
-
-  // get background color based on status
-  const getBackgroundColor = (): React.CSSProperties => {
-    if (status === 'uploading') {
-      return { background: '#ffd700', color: '#000' };  // gold for uploading
-    }
-    if (status === 'processing') {
-      return { background: '#87ceeb', color: '#000' };  // light blue for processing
-    }
-    if (status === 'ready') {
-      return { background: '#90ee90', color: '#000' };  // light green for ready
-    }
-    if (status === 'error') {
-      return { background: '#ff6b6b', color: '#fff' };  // red for error
-    }
-    return { background: '#ddd', color: '#000' };  // gray for unknown
+  const colorMap: Record<string, React.CSSProperties> = {
+    uploading:  { background: '#ffd700', color: '#000' },
+    processing: { background: '#87ceeb', color: '#000' },
+    ready:      { background: '#90ee90', color: '#000' },
+    error:      { background: '#ff6b6b', color: '#fff' },
   };
 
-  // get display text based on status
-  const getDisplayText = (): string => {
-    if (status === 'uploading') {
-      return `${progress}%`;
-    }
-    if (status === 'processing') {
-      return 'Processing...';
-    }
-    if (status === 'ready') {
-      return 'Ready';
-    }
-    if (status === 'error') {
-      return 'Error';
-    }
-    return '';
+  const textMap: Record<string, string> = {
+    uploading:  `${progress}%`,
+    processing: 'Processing...',
+    ready:      'Ready',
+    error:      'Error',
   };
 
   return (
-    <span style={{ ...sidebarStyles.badge, ...getBackgroundColor() }}>
-      {getDisplayText()}
+    <span style={{ ...sidebarStyles.badge, ...(colorMap[status] || { background: '#ddd', color: '#000' }) }}>
+      {textMap[status] || ''}
     </span>
   );
 }
 
 
 interface SidebarProps {
-  files: FileMeta[];                              // list of file metadata to display
-  onSelect: (file: FileMeta) => void;             // callback when user clicks a file
-  uploadStatus: Record<string, UploadStatus>;     // upload status for each file by name
+  files: FileMeta[];
+  onSelect: (file: FileMeta) => void;
+  uploadStatus: Record<string, UploadStatus>;
 }
 
-// main sidebar component
 function Sidebar({ files, onSelect, uploadStatus = {} }: SidebarProps) {
   return (
     <div style={sidebarStyles.container}>
-
-      {/* app title */}
       <h2 style={sidebarStyles.appTitle}>Lens</h2>
-
-      {/* section header */}
       <h3 style={sidebarStyles.sectionHeader}>Files</h3>
 
-      {/* scrollable list of files */}
       <div style={sidebarStyles.fileList}>
-        {files.map((fileMetadata, fileIndex) => {
-          const statusForThisFile = uploadStatus[fileMetadata.name];
-
+        {files.map((file, i) => {
+          const status = uploadStatus[file.name];
           return (
-            <div
-              key={fileIndex}
-              style={sidebarStyles.fileItem}
-              onClick={() => onSelect(fileMetadata)}
-            >
-              {/* file name */}
-              <div style={sidebarStyles.fileName}>
-                {fileMetadata.name}
-              </div>
-
-              {/* status badge if available */}
-              {statusForThisFile && (
-                <StatusBadge
-                  status={statusForThisFile.status}
-                  progress={statusForThisFile.progress}
-                />
-              )}
+            <div key={i} style={sidebarStyles.fileItem} onClick={() => onSelect(file)}>
+              <div style={sidebarStyles.fileName}>{file.name}</div>
+              {status && <StatusBadge status={status.status} progress={status.progress} />}
             </div>
           );
         })}
       </div>
-
     </div>
   );
 }
