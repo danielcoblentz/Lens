@@ -1,133 +1,155 @@
-// home page - upload pdfs, view them, ask questions
+// Home page: upload PDFs, view them, ask questions.
+//
+// State is intentionally local. Each uploaded file is tracked by name in a
+// status map (uploading -> processing -> ready | error). The actual File
+// objects live in a ref because they cannot be serialized into React state
+// without losing the underlying blob.
 
-import React, { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, useEffect, ChangeEvent } from 'react';
 import Sidebar from '../components/Sidebar';
 import FileViewer from '../components/FileViewer';
 import ChatBox from '../components/ChatBox';
-import { uploadPDF } from '../services/aws';
+import { uploadPDF, pollSessionUntilReady } from '../services/aws';
 import { FileMeta, UploadStatus } from '../types';
 
 function Home() {
-  const [allFilesMetadata, setAllFilesMetadata] = useState<FileMeta[]>([]);
-  const [currentlySelectedFile, setCurrentlySelectedFile] = useState<File | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [fileUploadStatuses, setFileUploadStatuses] = useState<Record<string, UploadStatus>>({});
+  const [files, setFiles] = useState<FileMeta[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<Record<string, UploadStatus>>({});
 
-  // we need a ref for file objects since you cant serialize File into state metadata
-  const actualFileObjectsRef = useRef<File[]>([]);
+  const fileObjects = useRef<File[]>([]);
+  const pollAbortControllers = useRef<AbortController[]>([]);
 
+  // Cancel any in-flight polls when the page unmounts so we don't leak fetches.
+  useEffect(() => {
+    return () => pollAbortControllers.current.forEach((c) => c.abort());
+  }, []);
 
-  const handleUserSelectedFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const filesUserSelected = Array.from(event.target.files || []);
+  const updateFileStatus = (
+    fileName: string,
+    patch: Partial<UploadStatus>,
+  ) => {
+    setUploadStatus((prev) => ({
+      ...prev,
+      [fileName]: { ...prev[fileName], ...patch },
+    }));
+  };
 
-    for (const selectedFile of filesUserSelected) {
-      if (selectedFile.type !== 'application/pdf') {
-        alert(`${selectedFile.name} is not a PDF file. Only PDF files are supported.`);
+  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files || []);
+
+    for (const file of selected) {
+      if (file.type !== 'application/pdf') {
+        alert(`${file.name} is not a PDF file. Only PDFs are supported.`);
         continue;
       }
 
-      actualFileObjectsRef.current = [...actualFileObjectsRef.current, selectedFile];
-
-      const fileMetadata: FileMeta = {
-        name: selectedFile.name,
-        size: selectedFile.size,
-        type: selectedFile.type,
-        lastModified: selectedFile.lastModified,
-      };
-      setAllFilesMetadata((prev) => [...prev, fileMetadata]);
-
-      setFileUploadStatuses((prev) => ({
+      fileObjects.current = [...fileObjects.current, file];
+      setFiles((prev) => [
         ...prev,
-        [selectedFile.name]: { progress: 0, status: 'uploading', sessionId: null },
+        {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          lastModified: file.lastModified,
+        },
+      ]);
+
+      setUploadStatus((prev) => ({
+        ...prev,
+        [file.name]: { progress: 0, status: 'uploading', sessionId: null },
       }));
 
       try {
-        const uploadResult = await uploadPDF(selectedFile, (pct) => {
-          setFileUploadStatuses((prev) => ({
-            ...prev,
-            [selectedFile.name]: { ...prev[selectedFile.name], progress: pct },
-          }));
+        const { sessionId } = await uploadPDF(file, (progress) =>
+          updateFileStatus(file.name, { progress }),
+        );
+
+        // Upload is done. LlamaParse is now chunking + embedding the PDF.
+        updateFileStatus(file.name, {
+          progress: 100,
+          status: 'processing',
+          sessionId,
         });
 
-        const newSessionId = uploadResult.sessionId;
+        // Poll the backend until parsing finishes. This replaces the old
+        // setTimeout(10s) hack which guessed when parsing would finish.
+        const controller = new AbortController();
+        pollAbortControllers.current.push(controller);
 
-        // upload done, now llamaParse is chunking + embedding on the backend
-        setFileUploadStatuses((prev) => ({
-          ...prev,
-          [selectedFile.name]: { progress: 100, status: 'processing', sessionId: newSessionId },
-        }));
-
-        // todo: poll backend for actual status instead of guessing 10s
-        setTimeout(() => {
-          setFileUploadStatuses((prev) => ({
-            ...prev,
-            [selectedFile.name]: { ...prev[selectedFile.name], status: 'ready' },
-          }));
-        }, 10000);
-
-      } catch (uploadError) {
-        console.error('file upload failed:', uploadError);
-        const errorMessage = uploadError instanceof Error ? uploadError.message : 'unknown error';
-        setFileUploadStatuses((prev) => ({
-          ...prev,
-          [selectedFile.name]: { progress: 0, status: 'error', sessionId: null, error: errorMessage },
-        }));
+        pollSessionUntilReady(sessionId, { signal: controller.signal })
+          .then((status) => {
+            if (status.status === 'READY_FOR_QUERY') {
+              updateFileStatus(file.name, { status: 'ready' });
+            } else {
+              updateFileStatus(file.name, {
+                status: 'error',
+                error: status.error ?? 'parse failed',
+              });
+            }
+          })
+          .catch((err) => {
+            if (err instanceof Error && err.message === 'poll cancelled') return;
+            updateFileStatus(file.name, {
+              status: 'error',
+              error: err instanceof Error ? err.message : 'unknown error',
+            });
+          });
+      } catch (err) {
+        updateFileStatus(file.name, {
+          progress: 0,
+          status: 'error',
+          sessionId: null,
+          error: err instanceof Error ? err.message : 'unknown error',
+        });
       }
     }
   };
 
-
-  const handleUserClickedFile = (clickedFile: FileMeta) => {
-    // match the metadata back to the actual File object for the viewer
-    const matchingFile = actualFileObjectsRef.current.find((f) =>
-      f.name === clickedFile.name && f.size === clickedFile.size && f.lastModified === clickedFile.lastModified
+  const handleSelect = (meta: FileMeta) => {
+    const file = fileObjects.current.find(
+      (f) =>
+        f.name === meta.name &&
+        f.size === meta.size &&
+        f.lastModified === meta.lastModified,
     );
-
-    setCurrentlySelectedFile(matchingFile || null);
-    setCurrentSessionId(fileUploadStatuses[clickedFile.name]?.sessionId || null);
+    setSelectedFile(file || null);
+    setActiveSessionId(uploadStatus[meta.name]?.sessionId ?? null);
   };
 
-
   return (
-    <div style={pageLayoutStyles.container}>
+    <div style={styles.container}>
       <Sidebar
-        files={allFilesMetadata}
-        onSelect={handleUserClickedFile}
-        uploadStatus={fileUploadStatuses}
+        files={files}
+        onSelect={handleSelect}
+        uploadStatus={uploadStatus}
       />
-
-      <div style={pageLayoutStyles.middleSection}>
-        <div style={pageLayoutStyles.uploadArea}>
+      <div style={styles.main}>
+        <div style={styles.uploadArea}>
           <h1>Upload Files</h1>
-          <input type="file" multiple accept=".pdf" onChange={handleUserSelectedFiles} />
+          <input
+            type="file"
+            multiple
+            accept=".pdf"
+            onChange={handleUpload}
+            aria-label="upload PDF"
+          />
         </div>
-        <div style={pageLayoutStyles.viewerArea}>
-          <FileViewer selectedFile={currentlySelectedFile} />
+        <div style={styles.viewer}>
+          <FileViewer selectedFile={selectedFile} />
         </div>
       </div>
-
-      <ChatBox sessionId={currentSessionId} />
+      <ChatBox sessionId={activeSessionId} />
     </div>
   );
 }
 
-const pageLayoutStyles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    height: '100vh',
-  },
-  middleSection: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  uploadArea: {
-    padding: '2rem',
-  },
-  viewerArea: {
-    flex: 1,
-    overflow: 'auto',
-  },
+const styles: Record<string, React.CSSProperties> = {
+  container: { display: 'flex', height: '100vh' },
+  main: { flex: 1, display: 'flex', flexDirection: 'column' },
+  uploadArea: { padding: '2rem' },
+  viewer: { flex: 1, overflow: 'auto' },
 };
 
 export default Home;

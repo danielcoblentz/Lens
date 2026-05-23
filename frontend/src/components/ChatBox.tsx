@@ -1,4 +1,4 @@
-// chat panel for asking questions about the selected document
+// Chat panel for asking questions about the currently selected document.
 
 import { useState } from 'react';
 import { queryRAG } from '../services/aws';
@@ -9,89 +9,82 @@ interface ChatBoxProps {
 }
 
 function ChatBox({ sessionId }: ChatBoxProps) {
-  const [conversationMessages, setConversationMessages] = useState<Message[]>([]);
-  const [userInputText, setUserInputText] = useState('');
-  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-
-  const handleSendMessage = async () => {
-    if (!userInputText.trim()) return;
-
+  const handleSend = async () => {
+    if (!input.trim()) return;
     if (!sessionId) {
-      alert('Please select an uploaded document first before asking questions.');
+      alert('Please select an uploaded document first.');
       return;
     }
 
-    const questionText = userInputText;
-    setUserInputText('');
-
-    setConversationMessages((prev) => [...prev, { role: 'user', content: questionText }]);
-    setIsWaitingForResponse(true);
+    const question = input;
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: question }]);
+    setIsLoading(true);
 
     try {
-      const ragResponse = await queryRAG(sessionId, questionText);
-      setConversationMessages((prev) => [...prev, { role: 'assistant', content: ragResponse.answer }]);
+      const { answer } = await queryRAG(sessionId, question);
+      setMessages((prev) => [...prev, { role: 'assistant', content: answer }]);
     } catch (err) {
-      console.error('query failed:', err);
-      const errorText = err instanceof Error ? err.message : 'unknown error';
-      setConversationMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${errorText}` }]);
+      const message = err instanceof Error ? err.message : 'unknown error';
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: `Error: ${message}` },
+      ]);
     } finally {
-      setIsWaitingForResponse(false);
+      setIsLoading(false);
     }
   };
 
-
-  const handleKeyPress = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter' && !isWaitingForResponse) {
-      handleSendMessage();
-    }
-  };
-
-  const inputDisabled = isWaitingForResponse || !sessionId;
-  const placeholderText = sessionId ? 'Ask a question about the document...' : 'Select a document first';
+  const disabled = isLoading || !sessionId;
+  const placeholder = sessionId
+    ? 'Ask a question about the document...'
+    : 'Select a document first';
 
   return (
-    <div style={chatStyles.container}>
-      <div style={chatStyles.messagesArea}>
-        {conversationMessages.map((msg, i) => {
-          const isUser = msg.role === 'user';
-          return (
-            <div
-              key={i}
-              style={{
-                ...chatStyles.messageBubble,
-                alignSelf: isUser ? 'flex-end' : 'flex-start',
-                background: isUser ? '#daf1ff' : '#eee',
-              }}
-            >
-              {msg.content}
-            </div>
-          );
-        })}
+    <div style={styles.container}>
+      <div style={styles.messages} data-testid="chat-messages">
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            style={{
+              ...styles.bubble,
+              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              background: msg.role === 'user' ? '#daf1ff' : '#eee',
+            }}
+            data-testid={`message-${msg.role}`}
+          >
+            {msg.content}
+          </div>
+        ))}
       </div>
 
-      <div style={chatStyles.inputArea}>
+      <div style={styles.inputRow}>
         <input
-          style={chatStyles.textInput}
-          value={userInputText}
-          placeholder={placeholderText}
-          onChange={(e) => setUserInputText(e.target.value)}
-          onKeyDown={handleKeyPress}
-          disabled={inputDisabled}
+          style={styles.input}
+          value={input}
+          placeholder={placeholder}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !disabled && handleSend()}
+          disabled={disabled}
+          aria-label="chat input"
         />
         <button
-          style={{ ...chatStyles.sendButton, opacity: inputDisabled ? 0.6 : 1 }}
-          onClick={handleSendMessage}
-          disabled={inputDisabled}
+          style={{ ...styles.button, opacity: disabled ? 0.6 : 1 }}
+          onClick={handleSend}
+          disabled={disabled}
         >
-          {isWaitingForResponse ? '...' : 'Send'}
+          {isLoading ? '...' : 'Send'}
         </button>
       </div>
     </div>
   );
 }
 
-const chatStyles: Record<string, React.CSSProperties> = {
+const styles: Record<string, React.CSSProperties> = {
   container: {
     width: '250px',
     height: '100vh',
@@ -99,7 +92,7 @@ const chatStyles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     borderLeft: '1px solid #ddd',
   },
-  messagesArea: {
+  messages: {
     flex: 1,
     padding: '1rem',
     overflowY: 'auto',
@@ -107,24 +100,18 @@ const chatStyles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: '0.5rem',
   },
-  messageBubble: {
+  bubble: {
     padding: '0.5rem 1rem',
     borderRadius: '12px',
     maxWidth: '80%',
   },
-  inputArea: {
+  inputRow: {
     display: 'flex',
     padding: '0.5rem',
     borderTop: '1px solid #ddd',
   },
-  textInput: {
-    flex: 1,
-    padding: '0.5rem',
-  },
-  sendButton: {
-    marginLeft: '0.5rem',
-    padding: '0.5rem 1rem',
-  },
+  input: { flex: 1, padding: '0.5rem' },
+  button: { marginLeft: '0.5rem', padding: '0.5rem 1rem' },
 };
 
 export default ChatBox;

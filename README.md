@@ -1,24 +1,37 @@
 # Lens
 
-A serverless document analysis tool that lets users upload legal contracts and ask questions about them using retrieval-augmented generation. Built on AWS Lambda, DynamoDB, S3, and OpenAI.
+A serverless document analysis tool that lets users upload legal contracts
+and ask questions about them using retrieval-augmented generation. Built
+on AWS Lambda, DynamoDB, S3, and OpenAI.
 
-## System Design
+## System design
 
 <p align="center">
   <img src="System_architecture/architecture.png" alt="System Architecture" width="100%" />
 </p>
 
-The system is split into three Lambda functions connected by S3 events and API Gateway:
+The backend is four Lambda functions connected by S3 events and API
+Gateway:
 
-**LlamaGet** handles session creation. When a user uploads a file, the frontend requests a presigned S3 URL and a new session ID. The PDF is uploaded directly from the browser to S3, keeping Lambda out of the data path.
+| Lambda      | Trigger                  | Job                                                          |
+|-------------|--------------------------|--------------------------------------------------------------|
+| LlamaGet    | POST `/llamaGet`         | Open a session, return an S3 presigned PUT URL               |
+| LlamaParse  | S3 ObjectCreated         | Extract text, chunk, embed, persist to DynamoDB              |
+| LlamaQuery  | POST `/query`            | Embed the question, rank chunks, call the LLM                |
+| LlamaStatus | GET  `/sessions/{id}`    | Return the current parse status to the frontend              |
 
-**LlamaParse** is triggered automatically by the S3 upload event. It downloads the PDF, extracts text, splits it into overlapping chunks using recursive hierarchical separators, generates vector embeddings for each chunk via OpenAI, and stores everything in DynamoDB. Once done, it marks the session as ready for queries.
+PDFs are uploaded directly from the browser to S3 via the presigned URL,
+keeping Lambda out of the data path. Sessions move through
+`AWAITING_UPLOAD → PROCESSING → READY_FOR_QUERY` (or `ERROR`), and the
+frontend polls `LlamaStatus` to drive the UI rather than guessing how long
+parsing will take.
 
-**LlamaQuery** handles the question-answering flow. It embeds the user's question, retrieves all stored chunks for that session, ranks them by cosine similarity, selects the most relevant ones, and sends them to the LLM with a legal analysis prompt. The response is returned along with latency metrics.
+Storage:
+- **S3** — raw PDFs (`uploads/<sessionId>.pdf`)
+- **DynamoDB sessions** — one row per session (status + metadata)
+- **DynamoDB chunks** — one row per chunk (text + embedding vector)
 
-Storage is split between S3 for raw PDFs and DynamoDB for session metadata, text chunks, and embedding vectors. All external communication goes through API Gateway over HTTPS.
-
-## Getting Started
+## Getting started
 
 ### Frontend
 
@@ -28,43 +41,69 @@ npm install
 npm start
 ```
 
-The dev server starts at [http://localhost:3000](http://localhost:3000). API endpoints are configured in `frontend/.env`.
+Dev server at http://localhost:3000. API endpoint is configured in
+`frontend/.env` as `REACT_APP_API_BASE`.
 
 ### Backend
 
-Each Lambda function lives in `backend/` and needs to be packaged with its dependencies before deploying to AWS:
+Each Lambda lives in `Backend/` with its own `requirements.txt`. To
+package one for deployment, install its deps into the function directory
+and zip:
 
 ```bash
-# LlamaGet uses boto3 which is already available in Lambda
-
-# LlamaParse
-pip install PyPDF2 openai -t backend/LlamaParse
-
-# LlamaQuery
-pip install -r backend/LlamaQuery/requirements.txt -t backend/LlamaQuery
+cd Backend/LlamaParse
+pip install -r requirements.txt -t .
+zip -r ../LlamaParse.zip .
 ```
 
-### Required AWS Resources
+See `Backend/README.md` for the full packaging instructions and DynamoDB
+schema.
 
-- An S3 bucket for PDF uploads
-- Two DynamoDB tables: one for sessions (`sessionId` as partition key) and one for chunks (`sessionId` as partition key, `chunkId` as sort key)
-- API Gateway with POST routes for `/llamaGet` and `/query`
-- An S3 event notification on the `uploads/` prefix to trigger LlamaParse
+### Required AWS resources
 
-### Environment Variables
+- S3 bucket for PDF uploads
+- DynamoDB sessions table: `sessionId` (string, PK)
+- DynamoDB chunks table: `sessionId` (string, PK) + `chunkId` (string, SK)
+- API Gateway with three routes:
+  - `POST /llamaGet`         → LlamaGet
+  - `POST /query`            → LlamaQuery
+  - `GET  /sessions/{id}`    → LlamaStatus
+- S3 event notification on the `uploads/` prefix → LlamaParse
 
-Set these in the Lambda console for each function:
+### Environment variables
 
-| Function | Variables |
-|----------|-----------|
-| LlamaGet | `BUCKET_NAME`, `TABLE_NAME` |
-| LlamaParse | `BUCKET_NAME`, `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
-| LlamaQuery | `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
+See `.env.example` for the full list. The headline ones:
+
+| Function    | Variables                                                  |
+|-------------|------------------------------------------------------------|
+| LlamaGet    | `BUCKET_NAME`, `TABLE_NAME`                                |
+| LlamaParse  | `BUCKET_NAME`, `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
+| LlamaQuery  | `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY`         |
+| LlamaStatus | `SESSIONS_TABLE`                                           |
+
+## Tests
+
+```bash
+# Backend
+cd Backend
+pip install -r tests/requirements.txt
+pytest
+
+# Frontend
+cd frontend
+npm test
+```
+
+Backend tests use `moto` to mock S3 + DynamoDB in-memory and patch the
+OpenAI client per-test. Frontend tests use Jest + React Testing Library
+with mocked `fetch`. Neither needs real AWS credentials or an OpenAI API
+key to run.
 
 ## Usage
 
-1. Start the frontend and open it in a browser
-2. Upload a PDF using the file input
-3. Wait for the status badge to show "Ready"
-4. Click on the file in the sidebar to view it
-5. Ask questions about the document in the chat panel
+1. Start the frontend and open it in a browser.
+2. Upload a PDF using the file input.
+3. Wait for the status badge to switch from "Processing..." to "Ready"
+   (the badge polls `LlamaStatus` every two seconds).
+4. Click the file in the sidebar to view it.
+5. Ask questions about the document in the chat panel.

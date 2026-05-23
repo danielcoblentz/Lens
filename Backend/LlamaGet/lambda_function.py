@@ -1,52 +1,65 @@
+"""LlamaGet: open a session and return a presigned S3 PUT URL.
+
+Frontend calls this first. The PDF is then uploaded directly to S3 using
+the URL we hand back, which is what triggers LlamaParse via an S3
+ObjectCreated event.
+"""
+
+from __future__ import annotations
+
 import json
-import boto3
-import uuid
+import logging
 import os
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from typing import Any
 
-s3_client = boto3.client("s3")
-dynamodb_resource = boto3.resource("dynamodb")
+import boto3
 
-pdf_upload_bucket = os.environ["BUCKET_NAME"]
-sessions_table_name = os.environ["TABLE_NAME"]
-sessions_table = dynamodb_resource.Table(sessions_table_name)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+BUCKET_NAME = os.environ["BUCKET_NAME"]
+SESSIONS_TABLE = os.environ["TABLE_NAME"]
+PRESIGN_EXPIRES_SECONDS = int(os.environ.get("PRESIGN_EXPIRES_SECONDS", "3600"))
+
+s3 = boto3.client("s3")
+sessions_table = boto3.resource("dynamodb").Table(SESSIONS_TABLE)
+
+CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+}
 
 
-def lambda_handler(event, context):
-    new_session_id = str(uuid.uuid4())
-    s3_object_key = f"uploads/{new_session_id}.pdf"
+def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
+    return {"statusCode": status_code, "headers": CORS_HEADERS, "body": json.dumps(body)}
 
-    # presigned url lets the frontend upload directly to s3
-    presigned_upload_url = s3_client.generate_presigned_url(
+
+def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+    session_id = str(uuid.uuid4())
+    s3_key = f"uploads/{session_id}.pdf"
+
+    upload_url = s3.generate_presigned_url(
         ClientMethod="put_object",
         Params={
-            "Bucket": pdf_upload_bucket,
-            "Key": s3_object_key,
-            "ContentType": "application/pdf"
+            "Bucket": BUCKET_NAME,
+            "Key": s3_key,
+            "ContentType": "application/pdf",
         },
-        ExpiresIn=3600
+        ExpiresIn=PRESIGN_EXPIRES_SECONDS,
     )
 
-    # create session record so llamaParse can find it after upload
     sessions_table.put_item(
         Item={
-            "sessionId": new_session_id,
+            "sessionId": session_id,
             "status": "AWAITING_UPLOAD",
-            "createdAt": datetime.utcnow().isoformat(),
-            "s3Key": s3_object_key
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "s3Key": s3_key,
         }
     )
 
-    return {
-        "statusCode": 200,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Methods": "POST, OPTIONS"
-        },
-        "body": json.dumps({
-            "sessionId": new_session_id,
-            "uploadUrl": presigned_upload_url
-        })
-    }
+    logger.info("opened session %s", session_id)
+    return _response(200, {"sessionId": session_id, "uploadUrl": upload_url})

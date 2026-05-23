@@ -1,0 +1,7 @@
+# Test-only dependencies for the Backend Lambda functions.
+boto3>=1.28
+moto[s3,dynamodb]>=5.0
+openai==1.12.0
+PyPDF2==3.0.1
+pytest>=8.0
+pytest-cov>=4.1

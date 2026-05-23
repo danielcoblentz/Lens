@@ -1,29 +1,62 @@
-# Lens Frontend (Create React App)
+# Lens Frontend
 
-React + react-pdf UI for uploading PDFs, viewing pages, and chatting against backend RAG endpoints.
+React + TypeScript UI for the Lens document analysis tool. Uploads PDFs,
+displays them with `react-pdf`, and chats against the RAG backend.
 
-## Scripts (CRA)
-- `npm start` — dev server at http://localhost:3000
-- `npm test` — CRA test runner
-- `npm run build` — production build to `build/`
+## Scripts
 
-## Project structure (key)
-- `src/pages/Home.js` — layout wiring sidebar, viewer, and chat.
-- `src/components/Sidebar.js` — file list.
-- `src/components/FileViewer.js` — PDF rendering via `react-pdf`.
-- `src/components/ChatBox.js` — chat UI scaffold.
+| Command           | What it does                              |
+|-------------------|-------------------------------------------|
+| `npm start`       | Dev server at http://localhost:3000       |
+| `npm test`        | Run the test suite once (CI mode)         |
+| `npm run test:watch` | Watch-mode test runner                 |
+| `npm run build`   | Production build to `build/`              |
 
-## Wiring to the backend
-Add your API base and any defaults via environment variables (CRA uses `REACT_APP_*`):
-- `REACT_APP_API_BASE` — API Gateway base URL (e.g., `https://xyz.execute-api.us-east-1.amazonaws.com/prod`).
-- Optional: `REACT_APP_DEFAULT_TOP_K`, `REACT_APP_DEFAULT_SESSION_ID` for testing.
+## Configuration
 
-Update `Home.js` and `ChatBox.js` to call your deployed `presign` and `query` endpoints. Keep secrets out of the frontend; only non-sensitive URLs/flags should be in env files.
+Set the API base URL in `.env`:
 
-## Requirements
-- Node 18+
-- npm
+```
+REACT_APP_API_BASE=https://<api-id>.execute-api.<region>.amazonaws.com/prod
+```
 
-## Notes
-- This project uses Create React App (not Vite). Use `npm start`/`npm run build` from CRA scripts.
-- Ensure `react-pdf` worker is reachable (see `FileViewer.js` for workerSrc config).
+Only non-sensitive values belong in the client bundle.
+
+## Project structure
+
+```
+src/
+├── App.tsx                 — Router shell
+├── index.tsx               — React entrypoint
+├── pages/
+│   └── Home.tsx            — Upload + viewer + chat layout
+├── components/
+│   ├── Sidebar.tsx         — File list with status badges
+│   ├── FileViewer.tsx      — react-pdf viewer for the selected file
+│   └── ChatBox.tsx         — RAG chat panel
+├── services/
+│   └── aws.ts              — fetch wrappers for the four backend endpoints
+└── types/
+    └── index.ts            — Shared TypeScript types
+```
+
+## Upload + parse flow
+
+```
+1. user picks a PDF
+2. POST /llamaGet                        → sessionId + presigned URL
+3. PUT pdf direct to S3                  (triggers LlamaParse on the backend)
+4. status = uploading       (XHR progress)
+5. status = processing      (after upload completes)
+6. GET /sessions/{id} every 2s           (pollSessionUntilReady)
+7. status = ready | error   (from the backend's session row)
+```
+
+The old `setTimeout(10s)` hack has been replaced by real polling against
+the `LlamaStatus` Lambda.
+
+## Testing
+
+The suite uses Jest (via Create React App) + React Testing Library.
+`fetch` is mocked per-test in `services/aws.test.ts`, and the AWS service
+module is mocked when testing components that depend on it.

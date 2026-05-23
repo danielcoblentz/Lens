@@ -4,11 +4,12 @@ import './index.css';
 import App from './App';
 
 const rootElement = document.getElementById('root');
-if (!rootElement) throw new Error('root element not found');
+if (!rootElement) {
+  throw new Error('root element not found in index.html');
+}
 
-const root = ReactDOM.createRoot(rootElement);
-root.render(
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <App />
-  </React.StrictMode>
+  </React.StrictMode>,
 );
