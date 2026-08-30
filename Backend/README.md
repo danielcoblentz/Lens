@@ -1,127 +1,113 @@
 ## Architecture
 
-Components:
-- llama_get
-  - handler.py: generate S3 presigned upload URLs
-  - create a session record in DynamoDB (see session schema below)
-  - requirements.txt: minimal deps (e.g., boto3, uuid)
-- llama_parse
-  - download PDF from S3
-  - parse text and sections
-  - generate embeddings
-  - write results to DynamoDB (and/or a vector store)
-- llama_query
-  - retrieve session data
-  - search embeddings
-  - call an LLM
-  - return an answer (with optional citations/sections)
+Three independent Lambda functions, each deployed as its own zip:
 
+- `LlamaGet/lambda_function.py` - creates a session, returns a presigned S3 upload URL.
+- `LlamaParse/lambda_function.py` - triggered by the S3 upload event, extracts and chunks the PDF text, embeds each chunk, writes the chunks to DynamoDB.
+- `LlamaQuery/lambda_function.py` - embeds a question, ranks the stored chunks by cosine similarity, and prompts the LLM with the highest scoring ones.
 
-## Directory Layout
+The pure logic is kept out of the handlers so it can be tested without AWS or OpenAI:
 
-- llama_get/
-  - handler.py
-  - model.py (session schema)
-  - requirements.txt
-- llama_parse/
-  - code to download, parse, chunk, embed, and persist results
-- llama_query/
-  - code to retrieve data, search embeddings, call LLM, and format answers
+- `LlamaParse/chunking.py` - `recursive_chunk_text`.
+- `LlamaQuery/retrieval.py` - `cosine_similarity` and `rank_chunks`.
 
 ## Prerequisites
 
-- Python 3.10+ (recommended)
-- AWS account with:
-  - S3 bucket for uploads
-  - DynamoDB table(s) for session and/or chunk storage
-  - IAM roles/policies for Lambda access
-- Embeddings/LLM provider (e.g., AWS Bedrock or OpenAI), as applicable
-- boto3 and other listed requirements per service
+- Python 3.10+
+- An S3 bucket for uploads, two DynamoDB tables, and IAM roles allowing each function to reach them
+- An OpenAI API key
 
-## Setup
+## Dependencies
 
-- Install dependencies in each service folder:
-  - cd llama_get && pip install -r requirements.txt
-  - cd llama_parse && pip install -r requirements.txt
-  - cd llama_query && pip install -r requirements.txt
+`LlamaGet` only needs boto3, which the Lambda runtime already provides. The other two
+need their dependencies vendored into the deployment package:
 
-- Configure environment variables (per function):
-  - AWS_REGION
-  - S3_BUCKET
-  - SESSIONS_TABLE
-  - CHUNKS_TABLE
-  - OPENAI_API_KEY
-  - LLM_MODEL (e.g., gpt-4o-mini)
-  - EMBEDDING_MODEL (e.g., text-embedding-3-small)
+```bash
+pip install PyPDF2 openai -t LlamaParse
+pip install -r LlamaQuery/requirements.txt -t LlamaQuery
+```
 
-**Environment Variable Management:**
-- Local: Copy `.env.example` → `.env` and fill in actual values
-- `.env` is git-ignored for security
-- Lambda: Set these in AWS Console → Lambda → Configuration → Environment variables for each function
-  - LlamaGet needs: S3_BUCKET, SESSIONS_TABLE
-  - LlamaParse
-  - LlamaQuery needs: SESSIONS_TABLE, CHUNKS_TABLE, OPENAI_API_KEY, LLM_MODEL
+## Environment Variables
 
-**Variable Name Mapping:**
-- `.env` uses: S3_BUCKET, SESSIONS_TABLE, CHUNKS_TABLE
-- Ensure Lambda environment variables match exactly (no quotes, consistent naming)
+| Function | Variables |
+|----------|-----------|
+| LlamaGet | `BUCKET_NAME`, `TABLE_NAME` |
+| LlamaParse | `BUCKET_NAME`, `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
+| LlamaQuery | `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
 
-Note: Never commit `.env` or API keys to version control.
+`TABLE_NAME` and `SESSIONS_TABLE` refer to the same sessions table; the two functions
+just read it under different names. `OPENAI_API_KEY` is read by the OpenAI client
+itself rather than by the handler code.
+
+The embedding model (`text-embedding-3-small`) and the chat model (`gpt-4o-mini`) are
+hardcoded in the handlers, not configurable through the environment.
+
+Copy `.env.example` to `.env` for local use. `.env` is git-ignored; never commit keys.
 
 ## Data Model (DynamoDB)
 
-sessions (primary):
-- session_id (PK, string)
-- status (e.g., created | processing | ready | error)
-- file_name
-- s3_key
-- created_at, updated_at
-- doc_meta (optional)
-- chunk_count (optional)
-- error (optional)
+Sessions table, partition key `sessionId`:
 
-You may maintain a separate table or index for chunks/embeddings.
+- `sessionId` (string)
+- `status` - `AWAITING_UPLOAD` on creation, `READY_FOR_QUERY` once parsing finishes
+- `createdAt` - ISO 8601 timestamp
+- `s3Key` - `uploads/{sessionId}.pdf`
+
+Chunks table, partition key `sessionId` and sort key `chunkId`:
+
+- `chunkId` - `chunk_0`, `chunk_1`, and so on
+- `text` - the chunk body
+- `embedding` - list of `Decimal`, converted back to float when scoring
+- `order` - the chunk index
+
+## API
+
+Both routes are POST, fronted by API Gateway.
+
+`POST /llamaGet` takes no body.
+
+```json
+{ "sessionId": "…", "uploadUrl": "https://…" }
+```
+
+`POST /query`:
+
+```json
+{ "sessionId": "…", "query": "What is the termination clause?" }
+```
+
+```json
+{ "sessionId": "…", "answer": "…", "metrics": { "embedding_time_ms": 0, "similarity_search_time_ms": 0, "chunks_searched": 0, "llm_time_ms": 0, "total_time_ms": 0, "top_chunk_similarity": 0 } }
+```
+
+Returns 404 if the session is unknown or has no chunks yet.
 
 ## Workflows
 
-Upload:
-1) Call the presign endpoint to create a session and receive a presigned upload URL.
-2) Upload the PDF to S3 using the returned URL.
-3) The parse function processes the file and updates the session status to ready.
+Upload: `POST /llamaGet` creates the session and returns a presigned URL, the browser
+PUTs the PDF straight to S3, and the object-created event on the `uploads/` prefix
+triggers LlamaParse, which flips the session to `READY_FOR_QUERY`.
 
-Query:
-1) Call the query endpoint with { session_id, question }.
-2) The query function retrieves chunks/embeddings, searches, calls the LLM, and returns an answer.
-
-## Example API Shapes (if fronted by API Gateway)
-
-- GET /presign?filename=my.pdf
-  - Response: { session_id, upload_url, s3_key, expires_in }
-- POST /query
-  - Body: { session_id: "abc123", question: "What is the termination clause?" }
-  - Response: { answer: "...", citations: [{ section_id, score }], session_id }
-
-Note: Exact routes/payloads may vary based on your infra setup.
+Query: `POST /query` embeds the question, scores every chunk stored for the session,
+and sends the top five to the LLM.
 
 ## Deployment
 
-Use your preferred tooling (SAM, Serverless Framework, Terraform, CDK):
-- Package and deploy each function with required IAM permissions.
-- Configure triggers:
-  - llama_get behind API Gateway (for presigned URL and session creation)
-  - llama_parse via S3 event or async orchestration
-  - llama_query behind API Gateway (for Q&A)
-- Set environment variables for each function.
+There is no infrastructure-as-code in this repo yet. The S3 bucket, DynamoDB tables,
+IAM roles, API Gateway routes, and the S3 event notification are created by hand, and
+each function is uploaded as a zip built from the commands above.
 
-## Local Development & Testing
+## Tests
 
-- Unit test handlers locally with your runtime (e.g., pytest, local invokes).
-- For presign URL testing: invoke llama_get.handler with a filename input and test S3 upload via curl.
-- For parsing: simulate an S3 event or call the parse code with a local file.
-- For querying: supply a session_id that has processed chunks/embeddings.
+The chunking and retrieval modules are covered by pytest and need no AWS credentials:
+
+```bash
+pip install pytest
+python -m pytest tests
+```
 
 ## Notes
 
-- Ensure presigned URLs have reasonable expiry and restricted permissions.
-- Validate file types and sizes before upload.
-- Log minimally sensitive data; avoid storing raw PII when possible.
+- Keep presigned URL expiry short; it is currently one hour.
+- LlamaParse embeds one chunk per request, so a large PDF means a lot of sequential calls.
+- Parsing is not idempotent - re-uploading the same key rewrites the chunks.
