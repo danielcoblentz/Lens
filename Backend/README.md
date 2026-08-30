@@ -93,9 +93,16 @@ and sends the top five to the LLM.
 
 ## Deployment
 
-There is no infrastructure-as-code in this repo yet. The S3 bucket, DynamoDB tables,
-IAM roles, API Gateway routes, and the S3 event notification are created by hand, and
-each function is uploaded as a zip built from the commands above.
+`template.yaml` in the repo root is a SAM template covering all three functions, the
+bucket, both tables, the IAM roles, the API Gateway routes, and the S3 notification.
+
+```bash
+sam build
+sam deploy --guided
+```
+
+It asks for `UploadBucketName` and `OpenAIApiKey`, and outputs `ApiBaseUrl` for the
+frontend's `REACT_APP_API_BASE`.
 
 ## Tests
 

@@ -42,12 +42,19 @@ pip install PyPDF2 openai -t Backend/LlamaParse
 pip install -r Backend/LlamaQuery/requirements.txt -t Backend/LlamaQuery
 ```
 
-### Required AWS Resources
+### Deploying
 
-- An S3 bucket for PDF uploads
-- Two DynamoDB tables: one for sessions (`sessionId` as partition key) and one for chunks (`sessionId` as partition key, `chunkId` as sort key)
-- API Gateway with POST routes for `/llamaGet` and `/query`
-- An S3 event notification on the `uploads/` prefix to trigger LlamaParse
+`template.yaml` is a SAM template that creates everything the functions need: the
+upload bucket, the sessions and chunks tables, the three functions with their IAM
+roles, the API Gateway routes, and the S3 event notification on the `uploads/` prefix.
+
+```bash
+sam build
+sam deploy --guided
+```
+
+It prompts for the bucket name and the OpenAI key, then outputs `ApiBaseUrl` to use as
+`REACT_APP_API_BASE` in the frontend.
 
 ### Environment Variables
 

@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Lens - serverless legal document analysis
+
+Parameters:
+  UploadBucketName:
+    Type: String
+    Description: Globally unique name for the bucket that holds uploaded PDFs.
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI key used by LlamaParse and LlamaQuery.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Handler: lambda_function.lambda_handler
+    Timeout: 300
+    MemorySize: 512
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      # the handlers set CORS headers themselves; this answers the preflight
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type'"
+        AllowMethods: "'POST,OPTIONS'"
+
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref UploadBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [PUT]
+            AllowedOrigins: ["*"]
+            AllowedHeaders: ["*"]
+
+  SessionsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: sessionId
+        Type: String
+
+  ChunksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: chunkId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+        - AttributeName: chunkId
+          KeyType: RANGE
+
+  LlamaGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Backend/LlamaGet/
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadBucketName
+          TABLE_NAME: !Ref SessionsTable
+      Policies:
+        # the presigned URL is signed with this role, so it needs the upload right
+        - S3WritePolicy:
+            BucketName: !Ref UploadBucketName
+        - DynamoDBWritePolicy:
+            TableName: !Ref SessionsTable
+      Events:
+        Post:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /llamaGet
+            Method: post
+
+  LlamaParseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Backend/LlamaParse/
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadBucketName
+          SESSIONS_TABLE: !Ref SessionsTable
+          CHUNKS_TABLE: !Ref ChunksTable
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref UploadBucketName
+        - DynamoDBWritePolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBWritePolicy:
+            TableName: !Ref ChunksTable
+      Events:
+        Upload:
+          Type: S3
+          Properties:
+            Bucket: !Ref UploadBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
+
+  LlamaQueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Backend/LlamaQuery/
+      Environment:
+        Variables:
+          SESSIONS_TABLE: !Ref SessionsTable
+          CHUNKS_TABLE: !Ref ChunksTable
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ChunksTable
+      Events:
+        Post:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /query
+            Method: post
+
+Outputs:
+  ApiBaseUrl:
+    Description: Value for the frontend REACT_APP_API_BASE variable.
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  UploadBucket:
+    Value: !Ref UploadBucket
+  SessionsTable:
+    Value: !Ref SessionsTable
+  ChunksTable:
+    Value: !Ref ChunksTable
