@@ -1,10 +1,11 @@
 import json
 import boto3
 import os
-import math
 import time
 from boto3.dynamodb.conditions import Key
 from openai import OpenAI
+
+from retrieval import rank_chunks
 
 openai_client = OpenAI()
 dynamodb_resource = boto3.resource("dynamodb")
@@ -25,13 +26,6 @@ def get_query_embedding(query_text):
         input=query_text
     )
     return response.data[0].embedding
-
-
-def cosine_similarity(vec_a, vec_b):
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    mag_a = math.sqrt(sum(a * a for a in vec_a))
-    mag_b = math.sqrt(sum(b * b for b in vec_b))
-    return dot / (mag_a * mag_b + 1e-9)
 
 
 def lambda_handler(event, context):
@@ -61,21 +55,12 @@ def lambda_handler(event, context):
         return {"statusCode": 404, "headers": CORS_HEADERS,
                 "body": json.dumps({"error": "No chunks found"})}
 
-    # rank chunks by cosine similarity to the question
+    # rank chunks by cosine similarity and keep the most relevant for the prompt
     search_start = time.time()
-    scored = []
-    for chunk in chunks:
-        embedding = chunk.get("embedding")
-        if embedding:
-            emb_floats = [float(v) for v in embedding]
-            sim = cosine_similarity(query_embedding, emb_floats)
-            scored.append((sim, chunk["text"]))
+    top_chunks = rank_chunks(query_embedding, chunks)
     metrics["similarity_search_time_ms"] = round((time.time() - search_start) * 1000)
     metrics["chunks_searched"] = len(chunks)
 
-    # grab the top 5 most relevant chunks for the llm prompt
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top_chunks = scored[:5]
     context = "\n\n---\n\n".join(text for _, text in top_chunks)
 
     prompt = f"""You are a legal contract analyst. Extract and explain the relevant clause.
