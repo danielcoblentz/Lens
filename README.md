@@ -59,6 +59,23 @@ Set these in the Lambda console for each function:
 | LlamaParse | `BUCKET_NAME`, `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
 | LlamaQuery | `SESSIONS_TABLE`, `CHUNKS_TABLE`, `OPENAI_API_KEY` |
 
+## Tests
+
+The frontend components run under jest and React Testing Library:
+
+```bash
+cd frontend
+npm test
+```
+
+The chunking and retrieval logic is covered by pytest and needs no AWS credentials
+or API key:
+
+```bash
+pip install pytest
+python -m pytest Backend/tests
+```
+
 ## Usage
 
 1. Start the frontend and open it in a browser
