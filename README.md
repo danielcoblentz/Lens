@@ -4,9 +4,7 @@ A serverless document analysis tool that lets users upload legal contracts and a
 
 ## System Design
 
-<p align="center">
-  <img src="System_architecture/architecture.png" alt="System Architecture" width="100%" />
-</p>
+The source diagram lives in [`System_architecture/design.excalidraw`](System_architecture/design.excalidraw), which you can open at [excalidraw.com](https://excalidraw.com).
 
 The system is split into three Lambda functions connected by S3 events and API Gateway:
 
@@ -32,16 +30,16 @@ The dev server starts at [http://localhost:3000](http://localhost:3000). API end
 
 ### Backend
 
-Each Lambda function lives in `backend/` and needs to be packaged with its dependencies before deploying to AWS:
+Each Lambda function lives in `Backend/` and needs to be packaged with its dependencies before deploying to AWS:
 
 ```bash
-# LlamaGet uses boto3 which is already available in Lambda
+# LlamaGet only uses boto3, which Lambda already provides
 
 # LlamaParse
-pip install PyPDF2 openai -t backend/LlamaParse
+pip install PyPDF2 openai -t Backend/LlamaParse
 
 # LlamaQuery
-pip install -r backend/LlamaQuery/requirements.txt -t backend/LlamaQuery
+pip install -r Backend/LlamaQuery/requirements.txt -t Backend/LlamaQuery
 ```
 
 ### Required AWS Resources
